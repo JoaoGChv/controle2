@@ -66,3 +66,41 @@ Podes também abrir o `..._objects_isaac_sim.usd` na GUI (via runheadless+WebRTC
 prims de `/World/Scene/Objects/` à mão, e correr a física.
 
 `objects_preview.png` — os 34 objetos coloridos (ambiente=cinza).
+
+---
+
+## ⭐ Caminho A — 3DGS FOTORREALISTA + mesh de colisão OCULTO (juntos, tipo Omniverse)
+Isto substitui os "gaussianos como pontos": agora o GS renderiza a sério (NuRec/RTX) e o mesh
+TSDF fica invisível, só para colisão/física. **Precisa de Isaac Sim 5.0–6.0** (o NuRec é do
+renderer RTX; renderiza no 5.0). Feito no 4090 com o 3DGRUT.
+
+Ficheiros novos no bundle:
+- `d435i_3pass_gs_collision.usdz` — **o entregável**: `/World/gauss` (Volume NuRec, render
+  fotorrealista) + `/World/mesh` (mesh TSDF, colisão ativada, é o `proxy` do volume). GS e mesh
+  já **co-registados no mesmo frame métrico** (alinhamento Sim(3) exato por centros de câmara +
+  filtro de floaters; ver `gs_mesh_align_overlay.png`).
+- `d435i_3pass_gs.usdz` — só o GS NuRec (sem colisão), para inspeção visual rápida.
+- `run_gs_collision_demo.py` — larga um cubo que cai e colide com a geometria real da cena.
+
+### Ver o render fotorrealista (GUI, AnyDesk)
+Abre `d435i_3pass_gs_collision.usdz` no Isaac (arrasta para o viewport, ou File>Open). Põe o
+renderer em **RTX - Real-Time** (ou Interactive/Path-Traced). Deves ver a sala fotorrealista
+(não pontos). O mesh de colisão está lá mas podes deixá-lo visível ou ocultá-lo (`/World/mesh`).
+
+### Testar a colisão (headless, prova que GS e mesh estão sobrepostos)
+```bash
+./python.sh /root/dtvf_isaac/run_gs_collision_demo.py d435i_3pass_gs_collision.usdz
+# opções: --steps 240 (mais tempo de queda) --drop 0.8 (largar mais alto)
+```
+Saída no host: `gs_collision/rgb_0000.png` (cubo no ar, sobre o render GS) e `rgb_0001.png`
+(cubo assente na superfície). O log diz o Δqueda e se "SIM (colidiu)". O ponto é: o cubo pára
+onde a superfície APARECE no render GS → GS e colisão coincidem.
+
+### Notas Caminho A
+- `metersPerUnit=1`, `upAxis=Z`, gravidade em −Z. `/World/gauss` tem `xformOp:transform`
+  identidade e o mesh é referenciado nas coords nativas → estão no mesmo sítio, não mexas nos xforms.
+- Se o NuRec **não** renderizar no 5.0 (aparecer vazio/preto no viewport): confirma o renderer RTX
+  (não "Storm"), e testa primeiro o `d435i_3pass_gs.usdz`. Se mesmo assim falhar, dá upgrade p/
+  Isaac 5.1/6.0 (o mesmo USDZ serve) — o alinhamento e a física não mudam.
+- O mesh usa `MeshCollisionAPI approximation="none"` (malha exata, estática). Se o cooking for
+  lento na 2060, troca para `"convexDecomposition"` no script (menos exato, mais rápido).
