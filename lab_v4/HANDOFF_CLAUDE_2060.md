@@ -80,3 +80,16 @@ centros de câmara; ver gs_mesh_align_overlay.png). `lab_v4_gs.usdz` = só o GS.
 ./python.sh /root/dtvf_isaac/run_gs_collision_demo.py lab_v4_gs_collision.usdz
 ```
 Renders em `gs_collision/rgb_0000.png` (antes) e `rgb_0001.png` (depois).
+
+---
+
+## ⭐⭐ v2 — splat RETREINADO com 3DGRUT MCMC (qualidade nova geração)
+O GS antigo (splatfacto de maio) tinha névoa/floaters/streaks — inviável p/ navegação.
+Retreinado no 4090 com 3DGUT+MCMC (regularização de opacidade+escala): PSNR 28.8, SSIM 0.937,
+560k gaussianos limpos. Ver `gs_v2_render_sample.png` (render do treino — fotorrealista de verdade).
+
+- **`lab_v4_gs_collision_v2.usdz`** ← USAR ESTE (GS v2 + mesh de colisão, mesmo frame métrico)
+- `lab_v4_gs_v2.usdz` — só o GS v2
+- Os `lab_v4_gs*.usdz` SEM v2 são a versão antiga (manter só p/ comparação)
+
+Demo de colisão: `./python.sh /root/dtvf_isaac/run_gs_collision_demo.py lab_v4_gs_collision_v2.usdz`
