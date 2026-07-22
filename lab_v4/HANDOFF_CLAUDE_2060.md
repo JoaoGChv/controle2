@@ -66,3 +66,17 @@ Podes também abrir o `..._objects_isaac_sim.usd` na GUI (via runheadless+WebRTC
 prims de `/World/Scene/Objects/` à mão, e correr a física.
 
 `objects_preview.png` — os 34 objetos coloridos (ambiente=cinza).
+
+---
+
+## ⭐ Caminho A — 3DGS fotorrealista (NuRec) + mesh de colisão oculto
+Igual ao d435i_3pass: `lab_v4_gs_collision.usdz` = /World/gauss (Volume NuRec) + /World/mesh
+(colisão ativada, proxy do volume), co-registados no mesmo frame métrico (Sim(3) exata por
+centros de câmara; ver gs_mesh_align_overlay.png). `lab_v4_gs.usdz` = só o GS.
+
+- Abrir na GUI: arrastar `lab_v4_gs_collision.usdz` para o viewport (renderer RTX - Real-Time).
+- Teste de colisão headless (larga cubo que pára na superfície):
+```bash
+./python.sh /root/dtvf_isaac/run_gs_collision_demo.py lab_v4_gs_collision.usdz
+```
+Renders em `gs_collision/rgb_0000.png` (antes) e `rgb_0001.png` (depois).
