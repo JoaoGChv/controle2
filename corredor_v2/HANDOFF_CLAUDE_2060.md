@@ -84,3 +84,14 @@ Renders em `gs_collision/rgb_0000.png` (antes) e `rgb_0001.png` (depois).
 Nota: o GS do corredor é ESPARSO (concentra-se na zona da porta, onde há textura — corredor
 de baixa textura densifica pouco). O valor desta cena é o mesh navegável/colidível; o render
 GS completo exigiria recaptura com mais textura/luz.
+
+---
+
+## ⭐⭐ v2 — RETREINADO com 3DGRUT MCMC (resolveu o corredor esparso!)
+O GS antigo do corredor era esparso/só a porta. Retreinado com 3DGUT+MCMC: **PSNR 31.8, SSIM 0.951**,
+530k gaussianos cobrindo o corredor INTEIRO (armários, hidrante, quadro, portas — ver gs_v2_render_sample.png).
+
+- **`corredor_v2_gs_collision_v2.usdz`** ← USAR ESTE (GS v2 + mesh colisão)
+- `corredor_v2_gs_v2.usdz` — só o GS v2
+Demo colisão: `./python.sh /root/dtvf_isaac/run_gs_collision_demo.py corredor_v2_gs_collision_v2.usdz`
+Nota: o mesh TSDF é mais curto que o splat novo (que cobre o corredor todo) — a colisão vale onde há mesh.
