@@ -104,3 +104,11 @@ onde a superfície APARECE no render GS → GS e colisão coincidem.
   Isaac 5.1/6.0 (o mesmo USDZ serve) — o alinhamento e a física não mudam.
 - O mesh usa `MeshCollisionAPI approximation="none"` (malha exata, estática). Se o cooking for
   lento na 2060, troca para `"convexDecomposition"` no script (menos exato, mais rápido).
+
+---
+
+## ⭐⭐ v2 — RETREINADO com 3DGRUT (standard, não-MCMC)
+O MCMC colapsou nesta cena (captura 3-passadas é inside-out). 3dgut STANDARD resolveu:
+**PSNR 27.3, SSIM 0.911**, sem fog. Ver gs_v2_render_sample.png (sala: ventilador, sofá, tabuleiro xadrez).
+- **`d435i_3pass_gs_collision_v2.usdz`** ← USAR ESTE (GS v2 + mesh colisão, alinhado escala métrica 0.3138, 0.00mm)
+- Demo colisão: `./python.sh /root/dtvf_isaac/run_gs_collision_demo.py d435i_3pass_gs_collision_v2.usdz`
