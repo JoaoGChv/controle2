@@ -114,15 +114,20 @@ def main():
     sq = get_physx_scene_query_interface()
     amin, amax = -math.pi, math.pi
     ainc = (amax - amin) / NRAYS
+    OFF = 0.40          # começa o raio FORA do corpo do robô (evita auto-colisão)
 
     def do_scan(px, py, pz, yaw):
         rr = []
         oz = pz + LIDAR_Z
         for i in range(NRAYS):
             wa = yaw + amin + i * ainc
-            hit = sq.raycast_closest((px, py, oz), (math.cos(wa), math.sin(wa), 0.0), RANGE)
-            d = hit["distance"] if (hit and hit.get("hit")) else RANGE
-            rr.append(d if d > 0.35 else RANGE)      # ignora auto-colisão do robô
+            cx, cy = math.cos(wa), math.sin(wa)
+            ox, oy = px + OFF * cx, py + OFF * cy     # origem já fora do robô
+            hit = sq.raycast_closest((ox, oy, oz), (cx, cy, 0.0), RANGE - OFF)
+            if hit and hit.get("hit"):
+                rr.append(OFF + float(hit["distance"]))
+            else:
+                rr.append(RANGE)                       # nada -> alcance máximo
         return rr
 
     v = w = 0.0; stale = 0; step = 0
@@ -152,9 +157,11 @@ def main():
                 tx.sendto(pkt, scan_addr)
             except Exception:
                 pass
-        if step % 120 == 0:
-            p, _ = robot.get_world_pose()
-            log(f"cmd=[v {v:.2f} w {w:.2f}] robô=[{p[0]:.2f},{p[1]:.2f}]")
+            if step % (period * 20) == 0:              # debug do scan a cada ~2s
+                arr = np.array(rr)
+                nhit = int((arr < RANGE - 0.01).sum())
+                log(f"scan: hits={nhit}/{NRAYS} dist min={arr.min():.2f} "
+                    f"méd={arr.mean():.2f} max={arr.max():.2f}")
     rx.close(); tx.close(); print("LIDAR TELEOP DONE")
 
 
