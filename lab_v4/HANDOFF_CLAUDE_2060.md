@@ -151,3 +151,12 @@ MILESTONE 4 (opcional) — slam_toolbox p/ mapa.
 
 NOTA drive: na nav autónoma o Carter andava lento (rodas em modo posição). run_isaac_teleop.py
 põe kps=0/kds=1e5 nas rodas (modo velocidade) — deve resolver.
+
+### FIX teleop (27/07): Isaac py3.11 vs Humble rclpy py3.10 = incompatível
+Não dá para importar rclpy no Python do Isaac. Solução: ponte UDP.
+- cmd_vel_udp_bridge.py corre no python3 do SISTEMA (ROS sourced) e reenvia /cmd_vel -> UDP 9091.
+- run_isaac_teleop.py (Isaac py3.11, SEM source) lê o UDP e conduz. 3 terminais:
+  A) source /opt/ros/humble/setup.bash; ros2 launch teleop_twist_joy teleop-launch.py joy_config:='ps3'
+  B) source /opt/ros/humble/setup.bash; python3 <lab_v4>/cmd_vel_udp_bridge.py
+  C) ~/isaacsim/python.sh <lab_v4>/run_isaac_teleop.py    (NÃO sourced)
+Deadman DS4 = botão 8 (SHARE); stick esq. vertical=frente (axis1), horizontal=vira (axis0). --speed 3 se lento.
