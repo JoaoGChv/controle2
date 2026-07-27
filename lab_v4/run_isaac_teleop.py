@@ -16,7 +16,6 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 args = sys.argv[1:]
 HEADLESS = "--headless" in args
-FLIP = "--flip" in args
 SPEED = float(args[args.index("--speed") + 1]) if "--speed" in args else 1.0
 PORT = int(args[args.index("--port") + 1]) if "--port" in args else 9091
 fname = next((a for a in args if a.endswith((".usd", ".usdz", ".usda"))), "lab_v4_robot_scene.usdz")
@@ -57,25 +56,6 @@ def robot_asset():
 def main():
     open_stage(USD)
     stage = omni.usd.get_context().get_stage()
-
-    # --flip: vira a cena (GS+mesh) 180° em torno de X pelo centro -> troca chão/teto.
-    # Teste empírico; se corrigir, asso no ficheiro depois.
-    if FLIP:
-        from pxr import Gf, UsdGeom
-        gx = stage.GetPrimAtPath("/World/gauss")
-        vol = stage.GetPrimAtPath("/World/gauss/gauss")
-        ext = vol.GetAttribute("extent").Get() if vol and vol.IsValid() else None
-        if ext:
-            mn, mx = np.array(ext[0]), np.array(ext[1]); piv = (mn + mx) / 2
-        else:
-            piv = np.array([0.0, 0.0, 1.6])
-        Tm = Gf.Matrix4d().SetTranslate(Gf.Vec3d(*(-piv))) \
-            * Gf.Matrix4d().SetRotate(Gf.Rotation(Gf.Vec3d(1, 0, 0), 180)) \
-            * Gf.Matrix4d().SetTranslate(Gf.Vec3d(*piv))
-        xf = UsdGeom.Xformable(gx); xf.ClearXformOpOrder()
-        xf.AddTransformOp().Set(Tm)
-        log(f"--flip aplicado (pivot z={piv[2]:.2f})")
-
     world = World(stage_units_in_meters=1.0)
 
     UsdPhysics.Scene.Define(stage, Sdf.Path("/World/physicsScene"))
