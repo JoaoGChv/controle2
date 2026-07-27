@@ -95,13 +95,24 @@ def main():
 
     world.reset()
 
-    # controlo por VELOCIDADE nas rodas (stiffness=0, damping alto) — corrige a lentidão
+    # controlo por VELOCIDADE nas rodas (stiffness=0, damping alto) — corrige a lentidão.
+    # A API varia por versão -> tenta vários caminhos, modificando só as 2 rodas.
     try:
         idxs = [robot.get_dof_index(n) for n in wnames]
         ac = robot.get_articulation_controller()
-        ac.set_gains(kps=np.zeros(len(idxs)), kds=np.full(len(idxs), 1.0e5),
-                     joint_indices=np.array(idxs))
-        log(f"ganhos de roda p/ velocidade OK (dof idx {idxs})")
+        try:
+            kps, kds = ac.get_gains()                       # arrays sobre todos os DOFs
+            kps = np.array(kps, dtype=float); kds = np.array(kds, dtype=float)
+            for i in idxs:
+                kps[i] = 0.0; kds[i] = 1.0e5
+            ac.set_gains(kps, kds)
+        except Exception:
+            # fallback: via ArticulationView (dof properties)
+            av = robot._articulation_view
+            kp = av.get_gains()[0]; kd = av.get_gains()[1]
+            kp[:, idxs] = 0.0; kd[:, idxs] = 1.0e5
+            av.set_gains(kps=kp, kds=kd)
+        log(f"ganhos de roda -> modo velocidade OK (dof idx {idxs})")
     except Exception as e:
         log(f"aviso: não ajustei ganhos ({e}); se andar lento usa --speed 3")
 
