@@ -160,3 +160,29 @@ Não dá para importar rclpy no Python do Isaac. Solução: ponte UDP.
   B) source /opt/ros/humble/setup.bash; python3 <lab_v4>/cmd_vel_udp_bridge.py
   C) ~/isaacsim/python.sh <lab_v4>/run_isaac_teleop.py    (NÃO sourced)
 Deadman DS4 = botão 8 (SHARE); stick esq. vertical=frente (axis1), horizontal=vira (axis0). --speed 3 se lento.
+
+---
+
+## MESH LIMPA + MILESTONE 3 (lidar + RViz)
+Mesh de colisão limpa (clean_collision_mesh.py: removeu 565 fragmentos soltos, tapou buracos
+pequenos) -> lab_v4_robot_scene.usdz regenerado. Recopiar esse usdz.
+
+### M3 — lidar 2D -> /scan + TF -> RViz2
+Lidar 2D por raycasting dentro do Isaac (evita RTX lidar + OmniGraph; mesma estratégia UDP).
+4 terminais:
+  A) source /opt/ros/humble/setup.bash
+     ros2 run joy joy_node
+  A2) source /opt/ros/humble/setup.bash
+     ros2 run teleop_twist_joy teleop_node --ros-args -p require_enable_button:=false \
+       -p axis_linear.x:=1 -p scale_linear.x:=0.7 -p axis_angular.yaw:=0 -p scale_angular.yaw:=1.0
+  B) source /opt/ros/humble/setup.bash
+     python3 <lab_v4>/cmd_vel_udp_bridge.py           # PS4 -> /cmd_vel -> UDP 9091
+  C) source /opt/ros/humble/setup.bash
+     python3 <lab_v4>/isaac_scan_bridge.py            # UDP 9092 -> /scan + TF
+  D) ~/isaacsim/python.sh <lab_v4>/run_isaac_teleop_lidar.py   # (SEM source) drive + lidar
+  E) source /opt/ros/humble/setup.bash
+     rviz2 -d <lab_v4>/lab_v4.rviz                    # fixed frame = odom, mostra /scan + TF
+
+Conduz com o PS4: o robô anda na sala GS (Isaac) e o scan do lidar aparece no RViz2 a varrer as
+paredes/mobília. Fluxo: cmd_vel UDP 9091 (entra) ; scan+pose UDP 9092 (sai).
+Opções lidar: --rays 180 --lidar-hz 10 --range 12.  TF: map->odom->base_link->laser.
