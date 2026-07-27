@@ -93,3 +93,34 @@ Retreinado no 4090 com 3DGUT+MCMC (regularização de opacidade+escala): PSNR 28
 - Os `lab_v4_gs*.usdz` SEM v2 são a versão antiga (manter só p/ comparação)
 
 Demo de colisão: `./python.sh /root/dtvf_isaac/run_gs_collision_demo.py lab_v4_gs_collision_v2.usdz`
+
+---
+
+## ⭐⭐⭐ ROBÔ A NAVEGAR (digital twin p/ robótica)
+Passo novo: um robô com rodas percorre a cena 3DGS fotorrealista colidindo com a geometria real.
+
+**Pré-requisito resolvido no 4090 — gravity align:** o frame COLMAP/TSDF vinha inclinado (o "cima"
+não era Z). `gravity_align_scene.py` detetou o chão (RANSAC) e rodou GS+mesh para Z-up com o chão
+em z=0. Sem isto o robô escorregaria. Resultado: `lab_v4_robot_scene.usdz` (GS + colisão, Z-up).
+
+Ficheiros:
+- `lab_v4_robot_scene.usdz` — cena robot-ready (chão horizontal em z=0).
+- `nav_path.json` — start/goal + 13 waypoints (caminho A* de 7.2m na planta, desvia da mobília).
+- `nav_path.png` / `lab_v4_occupancy.png` — planta 2D (navegável vs obstáculos).
+- `run_robot_nav.py` — carrega a cena, põe Nova Carter no start, segue os waypoints (pure-pursuit),
+  grava frames.
+
+Correr:
+```bash
+./python.sh /root/dtvf_isaac/run_robot_nav.py lab_v4_robot_scene.usdz
+# opções: --robot carter|jetbot  --cam follow|top  --steps 3000
+```
+Saída: `robot_nav/rgb_XXXX.png` (sequência → vídeo do robô a andar no lab fotorrealista).
+
+NOTAS (script pode precisar de ajuste na 2060, não testável no 4090):
+- O path do asset do robô varia por versão do Isaac — o script tenta vários; se falhar, ajusta
+  `CANDS['carter']` (procura em `get_assets_root_path()/Isaac/Robots/...`).
+- Os nomes dos DOF das rodas do Nova Carter podem diferir (`joint_wheel_left/right`); se o robô não
+  andar, lista os joints (`robot.dof_names`) e corrige `wheel_dof_names`.
+- Há um GroundPlane de segurança em z=0 (evita cair em buracos do mesh). O mesh TSDF também colide.
+- Se o robô tombar: baixa a velocidade `v` ou sobe o spawn `z=0.15`.

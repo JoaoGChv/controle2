@@ -1,0 +1,150 @@
+"""
+Navegação de robô no digital twin (Caminho A v2, gravity-aligned): um robô com rodas percorre
+waypoints planeados (A* na planta do mesh) DENTRO da cena 3DGS fotorrealista, colidindo com a
+geometria real (mesh oculto). Prova o twin para robótica.
+
+Cena: `lab_v4_robot_scene.usdz` (/World/gauss NuRec + /World/mesh colisão, Z-up, chão em z=0).
+Waypoints: `nav_path.json` (mesma pasta) — start/goal/lista de [x,y,z].
+
+Uso (dentro do container Isaac 5.x, headless):
+  ./python.sh /root/dtvf_isaac/run_robot_nav.py lab_v4_robot_scene.usdz
+Opções: --steps 3000  --robot carter|jetbot  --cam follow|top
+Saída: /root/dtvf_isaac/robot_nav/rgb_XXXX.png (sequência p/ vídeo) + trajeto real do robô.
+"""
+import sys, json, math
+from pathlib import Path
+import numpy as np
+
+from isaacsim import SimulationApp
+sim = SimulationApp({"headless": True, "width": 1280, "height": 720})
+
+import omni.usd
+import omni.replicator.core as rep
+from pxr import UsdGeom, UsdLux, UsdPhysics, Gf, Sdf
+
+args = sys.argv[1:]
+fname = next((a for a in args if a.endswith((".usd", ".usdz", ".usda"))), "lab_v4_robot_scene.usdz")
+USD = "/root/dtvf_isaac/" + fname
+STEPS = int(args[args.index("--steps") + 1]) if "--steps" in args else 3000
+ROBOT = args[args.index("--robot") + 1] if "--robot" in args else "carter"
+CAM = args[args.index("--cam") + 1] if "--cam" in args else "follow"
+OUT = "/root/dtvf_isaac/robot_nav"
+NAV = str(Path("/root/dtvf_isaac") / "nav_path.json")
+
+try:
+    from isaacsim.core.utils.stage import open_stage, add_reference_to_stage
+    from isaacsim.core.api import World
+    from isaacsim.storage.native import get_assets_root_path
+except Exception:
+    from omni.isaac.core.utils.stage import open_stage, add_reference_to_stage
+    from omni.isaac.core import World
+    from omni.isaac.core.utils.nucleus import get_assets_root_path
+
+
+def log(m): print(f"[nav] {m}", flush=True)
+
+
+# ── asset do robô (path varia por versão -> tenta vários) ────────────────────
+ASSETS = get_assets_root_path()
+CANDS = {
+    "carter": ["/Isaac/Robots/Carter/nova_carter/nova_carter.usd",
+               "/Isaac/Robots/Carter/carter_v1.usd",
+               "/Isaac/Robots/NVIDIA/NovaCarter/nova_carter.usd"],
+    "jetbot": ["/Isaac/Robots/Jetbot/jetbot.usd"],
+}
+
+
+def robot_asset():
+    import omni.client
+    for rel in CANDS.get(ROBOT, []):
+        url = ASSETS + rel
+        try:
+            if omni.client.stat(url)[0] == omni.client.Result.OK:
+                return url
+        except Exception:
+            pass
+    return ASSETS + CANDS["carter"][0]      # tenta na mesma
+
+
+def main():
+    open_stage(USD)
+    stage = omni.usd.get_context().get_stage()
+    world = World(stage_units_in_meters=1.0)
+
+    # física + chão plano de segurança (o mesh já colide; o plano evita cair em buracos)
+    UsdPhysics.Scene.Define(stage, Sdf.Path("/World/physicsScene"))
+    from isaacsim.core.api.objects import GroundPlane
+    try:
+        GroundPlane(prim_path="/World/groundSafety", z_position=0.0, size=30.0)
+    except Exception as e:
+        log(f"ground plane fallback: {e}")
+    UsdLux.DomeLight.Define(stage, "/World/NavLight").CreateIntensityAttr(1000.0)
+
+    # waypoints
+    nav = json.loads(Path(NAV).read_text())
+    WP = np.array(nav["waypoints"], float)
+    log(f"{len(WP)} waypoints, start={nav['start']} goal={nav['goal']} ({nav.get('path_len_m','?')}m)")
+
+    # ── robô ──
+    from isaacsim.robot.wheeled_robots.robots import WheeledRobot
+    from isaacsim.robot.wheeled_robots.controllers.differential_controller import DifferentialController
+    asset = robot_asset(); log(f"robô: {asset}")
+    start = WP[0]
+    add_reference_to_stage(asset, "/World/Robot")
+    robot = world.scene.add(WheeledRobot(
+        prim_path="/World/Robot", name="robot", create_robot=False,
+        wheel_dof_names=["joint_wheel_left", "joint_wheel_right"],
+        position=np.array([start[0], start[1], 0.15])))
+    ctrl = DifferentialController(name="diff", wheel_radius=0.14, wheel_base=0.41)
+
+    # câmara p/ gravar
+    cam = rep.create.camera()
+    rp = rep.create.render_product(cam, (1280, 720))
+    writer = rep.WriterRegistry.get("BasicWriter")
+    writer.initialize(output_dir=OUT, rgb=True)
+    writer.attach([rp])
+
+    world.reset()
+    log("simulação iniciada")
+
+    wp_i = 1
+    frame = 0
+    for step in range(STEPS):
+        pos, quat = robot.get_world_pose()
+        yaw = math.atan2(2*(quat[0]*quat[3]+quat[1]*quat[2]),
+                         1-2*(quat[2]**2+quat[3]**2))
+        tgt = WP[min(wp_i, len(WP)-1)]
+        dx, dy = tgt[0]-pos[0], tgt[1]-pos[1]
+        dist = math.hypot(dx, dy)
+        if dist < 0.35:                        # chegou ao waypoint
+            if wp_i < len(WP)-1:
+                wp_i += 1
+            elif dist < 0.25:
+                log(f"CHEGOU AO GOAL em {step} passos"); break
+        # pure-pursuit: vira p/ o alvo, avança
+        ang = math.atan2(dy, dx) - yaw
+        ang = (ang + math.pi) % (2*math.pi) - math.pi
+        v = 0.6 * max(0.15, math.cos(ang))     # abranda em curva
+        w = 1.8 * ang
+        robot.apply_wheel_actions(ctrl.forward(command=[v, w]))
+        # câmara segue o robô
+        if CAM == "top":
+            eye = (pos[0], pos[1], 8.0); look = (pos[0], pos[1], 0.0)
+        else:
+            eye = (pos[0]-1.6*math.cos(yaw), pos[1]-1.6*math.sin(yaw), 1.3); look = tuple(pos)
+        with cam:
+            rep.modify.pose(position=eye, look_at=look)
+        world.step(render=(step % 10 == 0))
+        if step % 10 == 0:                     # grava ~1 frame a cada 10 passos
+            rep.orchestrator.step(rt_subframes=4); frame += 1
+    rep.orchestrator.wait_until_complete()
+    endp, _ = robot.get_world_pose()
+    log(f"fim: robô em [{endp[0]:.2f},{endp[1]:.2f}], {frame} frames em {OUT}/")
+    print("ROBOT NAV DONE")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    finally:
+        sim.close(); sys.exit(0)
