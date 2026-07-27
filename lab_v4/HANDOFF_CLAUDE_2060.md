@@ -124,3 +124,30 @@ NOTAS (script pode precisar de ajuste na 2060, não testável no 4090):
   andar, lista os joints (`robot.dof_names`) e corrige `wheel_dof_names`.
 - Há um GroundPlane de segurança em z=0 (evita cair em buracos do mesh). O mesh TSDF também colide.
 - Se o robô tombar: baixa a velocidade `v` ou sobe o spawn `z=0.15`.
+
+---
+
+## ⭐⭐⭐⭐ TELEOP ROS2 (PS4 + RViz + lidar) — em construção
+Objetivo do user: conduzir o robô com comando PS4, ver no RViz, com lidar, via ROS2 Humble,
+com Isaac a manter o render 3DGS. (Gazebo NÃO — não renderiza gaussianos.)
+
+Arquitetura: [PS4]->joy->teleop_twist_joy->/cmd_vel -> [Isaac Nova Carter] -> /scan+TF+/odom -> [RViz2]
+
+MILESTONE 1 — comando PS4 no ROS2 (independente):
+  sudo apt install ros-humble-joy ros-humble-teleop-twist-joy
+  ls /dev/input/js*            # deve aparecer js0 (USB) ou após parear Bluetooth
+  ros2 run joy joy_node        # noutro terminal: ros2 topic echo /joy (mexe os sticks)
+
+MILESTONE 2 — Isaac conduz por /cmd_vel (script run_isaac_teleop.py, reusa o drive validado):
+  Terminal A:  source /opt/ros/humble/setup.bash
+               ros2 launch teleop_twist_joy teleop-launch.py joy_config:='ps3'
+  Terminal B:  source /opt/ros/humble/setup.bash
+               <isaac>/python.sh /caminho/lab_v4/run_isaac_teleop.py
+  (segura o botão deadman do comando e mexe o stick -> robô anda na sala GS)
+  Se andar lento: --speed 3. O script já força controlo por velocidade nas rodas (stiffness=0).
+
+MILESTONE 3 (a seguir) — RTX lidar -> /scan + TF, ver no RViz2 (add script/graph do lidar).
+MILESTONE 4 (opcional) — slam_toolbox p/ mapa.
+
+NOTA drive: na nav autónoma o Carter andava lento (rodas em modo posição). run_isaac_teleop.py
+põe kps=0/kds=1e5 nas rodas (modo velocidade) — deve resolver.

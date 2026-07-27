@@ -6,10 +6,10 @@ geometria real (mesh oculto). Prova o twin para robótica.
 Cena: `lab_v4_robot_scene.usdz` (/World/gauss NuRec + /World/mesh colisão, Z-up, chão em z=0).
 Waypoints: `nav_path.json` (mesma pasta) — start/goal/lista de [x,y,z].
 
-Uso (dentro do container Isaac 5.x, headless):
-  ./python.sh /root/dtvf_isaac/run_robot_nav.py lab_v4_robot_scene.usdz
+Uso (Isaac 5.x nativo, headless) — resolve tudo relativo a ESTE ficheiro:
+  <isaac>/python.sh /caminho/para/lab_v4/run_robot_nav.py
 Opções: --steps 3000  --robot carter|jetbot  --cam follow|top
-Saída: /root/dtvf_isaac/robot_nav/rgb_XXXX.png (sequência p/ vídeo) + trajeto real do robô.
+Saída: <pasta_do_script>/robot_nav/rgb_XXXX.png (sequência p/ vídeo) + trajeto real do robô.
 """
 import sys, json, math
 from pathlib import Path
@@ -23,13 +23,15 @@ import omni.replicator.core as rep
 from pxr import UsdGeom, UsdLux, UsdPhysics, Gf, Sdf
 
 args = sys.argv[1:]
+# resolve tudo relativo à PASTA DESTE SCRIPT -> funciona em container OU nativo, em qualquer path
+HERE = Path(__file__).resolve().parent
 fname = next((a for a in args if a.endswith((".usd", ".usdz", ".usda"))), "lab_v4_robot_scene.usdz")
-USD = "/root/dtvf_isaac/" + fname
+USD = fname if Path(fname).is_absolute() else str(HERE / fname)
 STEPS = int(args[args.index("--steps") + 1]) if "--steps" in args else 3000
 ROBOT = args[args.index("--robot") + 1] if "--robot" in args else "carter"
 CAM = args[args.index("--cam") + 1] if "--cam" in args else "follow"
-OUT = "/root/dtvf_isaac/robot_nav"
-NAV = str(Path("/root/dtvf_isaac") / "nav_path.json")
+OUT = str(HERE / "robot_nav")
+NAV = str(HERE / "nav_path.json")
 
 try:
     from isaacsim.core.utils.stage import open_stage, add_reference_to_stage
@@ -91,9 +93,28 @@ def main():
     asset = robot_asset(); log(f"robô: {asset}")
     start = WP[0]
     add_reference_to_stage(asset, "/World/Robot")
+
+    # auto-deteta os 2 joints das rodas (nomes variam por versão/robô)
+    wheel_joints = []
+    for p in stage.Traverse():
+        tn = p.GetTypeName()
+        nm = p.GetName().lower()
+        if "RevoluteJoint" in str(tn) and ("wheel" in nm or "drive" in nm) \
+           and str(p.GetPath()).startswith("/World/Robot"):
+            wheel_joints.append(p.GetName())
+    left = [j for j in wheel_joints if "left" in j.lower() or j.lower().endswith("l")]
+    right = [j for j in wheel_joints if "right" in j.lower() or j.lower().endswith("r")]
+    if left and right:
+        wnames = [left[0], right[0]]
+    elif len(wheel_joints) >= 2:
+        wnames = wheel_joints[:2]
+    else:
+        wnames = ["joint_wheel_left", "joint_wheel_right"]     # fallback Carter
+    log(f"joints de roda detetados: {wheel_joints} -> a usar {wnames}")
+
     robot = world.scene.add(WheeledRobot(
         prim_path="/World/Robot", name="robot", create_robot=False,
-        wheel_dof_names=["joint_wheel_left", "joint_wheel_right"],
+        wheel_dof_names=wnames,
         position=np.array([start[0], start[1], 0.15])))
     ctrl = DifferentialController(name="diff", wheel_radius=0.14, wheel_base=0.41)
 
@@ -105,10 +126,17 @@ def main():
     writer.attach([rp])
 
     world.reset()
+    try:
+        log(f"DOFs do robô: {list(robot.dof_names)}")
+    except Exception:
+        pass
     log("simulação iniciada")
 
     wp_i = 1
     frame = 0
+    RENDER_EVERY = 15          # grava 1 frame a cada 15 passos de física (mais rápido)
+    PROG = 50                  # log de progresso a cada 50 passos
+    last_xy = (start[0], start[1])
     for step in range(STEPS):
         pos, quat = robot.get_world_pose()
         yaw = math.atan2(2*(quat[0]*quat[3]+quat[1]*quat[2]),
@@ -127,16 +155,24 @@ def main():
         v = 0.6 * max(0.15, math.cos(ang))     # abranda em curva
         w = 1.8 * ang
         robot.apply_wheel_actions(ctrl.forward(command=[v, w]))
-        # câmara segue o robô
-        if CAM == "top":
-            eye = (pos[0], pos[1], 8.0); look = (pos[0], pos[1], 0.0)
-        else:
-            eye = (pos[0]-1.6*math.cos(yaw), pos[1]-1.6*math.sin(yaw), 1.3); look = tuple(pos)
-        with cam:
-            rep.modify.pose(position=eye, look_at=look)
-        world.step(render=(step % 10 == 0))
-        if step % 10 == 0:                     # grava ~1 frame a cada 10 passos
+        # física a cada passo (rápido); render/gravação só a cada RENDER_EVERY
+        if step % RENDER_EVERY == 0:
+            if CAM == "top":
+                eye = (pos[0], pos[1], 8.0); look = (pos[0], pos[1], 0.0)
+            else:
+                eye = (pos[0]-1.8*math.cos(yaw), pos[1]-1.8*math.sin(yaw), 1.4); look = tuple(pos)
+            with cam:
+                rep.modify.pose(position=eye, look_at=look)
             rep.orchestrator.step(rt_subframes=4); frame += 1
+        else:
+            world.step(render=False)
+        # progresso visível a cada PROG passos
+        if step % PROG == 0:
+            log(f"passo {step}/{STEPS} | robô=[{pos[0]:.2f},{pos[1]:.2f}] "
+                f"wp {wp_i}/{len(WP)-1} dist={dist:.2f}m frames={frame}")
+            if step > 0 and math.hypot(pos[0]-last_xy[0], pos[1]-last_xy[1]) < 0.02:
+                log("  aviso: robô quase não se moveu (verificar rodas/física)")
+            last_xy = (pos[0], pos[1])
     rep.orchestrator.wait_until_complete()
     endp, _ = robot.get_world_pose()
     log(f"fim: robô em [{endp[0]:.2f},{endp[1]:.2f}], {frame} frames em {OUT}/")
