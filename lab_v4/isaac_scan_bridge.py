@@ -12,7 +12,9 @@ Depois: rviz2 -d lab_v4.rviz   (fixed frame = odom)
 import socket, struct, sys, math
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import LaserScan, PointCloud2
+from sensor_msgs_py import point_cloud2
+from std_msgs.msg import Header
 from geometry_msgs.msg import TransformStamped
 from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
 
@@ -28,6 +30,7 @@ class ScanBridge(Node):
     def __init__(self):
         super().__init__("isaac_scan_bridge")
         self.pub = self.create_publisher(LaserScan, "/scan", 10)
+        self.pub_pc = self.create_publisher(PointCloud2, "/points", 5)
         self.tfb = TransformBroadcaster(self)
         stf = StaticTransformBroadcaster(self)
         # estáticos: map->odom (identidade) e base_link->laser (lidar 0.35m acima)
@@ -47,14 +50,16 @@ class ScanBridge(Node):
         pkt = None
         while True:
             try:
-                pkt = self.sock.recv(4096)
+                pkt = self.sock.recv(65535)          # cabe o pacote 3D (rings*az floats)
             except BlockingIOError:
                 break
         if pkt is None:
             return
+        # cabeçalho: pose(4f) + rays(i) rings(i) + vfov(f) range(f) + ranges(rings*rays f)
         x, y, z, yaw = struct.unpack("<4f", pkt[:16])
-        n = struct.unpack("<i", pkt[16:20])[0]
-        rr = struct.unpack(f"<{n}f", pkt[20:20+4*n])
+        rays, rings, vfov, rmax = struct.unpack("<iiff", pkt[16:32])
+        ntot = rays * rings
+        rr = struct.unpack(f"<{ntot}f", pkt[32:32 + 4 * ntot])
         now = self.get_clock().now().to_msg()
         # TF odom->base_link (pose do robô)
         t = TransformStamped(); t.header.stamp = now; t.header.frame_id = "odom"
@@ -65,16 +70,38 @@ class ScanBridge(Node):
         t.transform.rotation.x = qx; t.transform.rotation.y = qy
         t.transform.rotation.z = qz; t.transform.rotation.w = qw
         self.tfb.sendTransform(t)
-        # /scan
+
+        # /scan (LaserScan) — anel do meio (horizontal), mantém o SLAM 2D a funcionar
+        mid = rings // 2
+        ring_mid = rr[mid * rays:(mid + 1) * rays]
         sc = LaserScan(); sc.header.stamp = now; sc.header.frame_id = "laser"
         sc.angle_min = -math.pi; sc.angle_max = math.pi
-        sc.angle_increment = (2 * math.pi) / n
-        sc.range_min = 0.2; sc.range_max = RANGE_MAX
-        sc.ranges = [float(r) for r in rr]
+        sc.angle_increment = (2 * math.pi) / rays
+        sc.range_min = 0.2; sc.range_max = rmax
+        sc.ranges = [float(r) for r in ring_mid]
         self.pub.publish(sc)
+
+        # /points (PointCloud2) — só em 3D (rings>1); reconstrói XYZ no frame do laser
+        if rings > 1:
+            ainc = (2 * math.pi) / rays
+            vr = math.radians(vfov)
+            pts = []
+            for k in range(rings):
+                el = (-vr / 2) + k * (vr / (rings - 1))
+                ce, se = math.cos(el), math.sin(el)
+                base = k * rays
+                for i in range(rays):
+                    r = rr[base + i]
+                    if r >= rmax - 0.01:
+                        continue                       # sem retorno -> não envia ponto
+                    a = -math.pi + i * ainc
+                    pts.append((r * math.cos(a) * ce, r * math.sin(a) * ce, r * se))
+            hdr = Header(); hdr.stamp = now; hdr.frame_id = "laser"
+            self.pub_pc.publish(point_cloud2.create_cloud_xyz32(hdr, pts))
+
         self.n += 1
         if self.n % 30 == 0:
-            self.get_logger().info(f"scan #{self.n} pose=({x:.2f},{y:.2f}) yaw={yaw:.2f}")
+            self.get_logger().info(f"scan #{self.n} {rings}anel×{rays}az pose=({x:.2f},{y:.2f})")
 
 
 def main():

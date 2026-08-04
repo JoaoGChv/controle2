@@ -1,16 +1,3 @@
-"""
-Navegação de robô no digital twin (Caminho A v2, gravity-aligned): um robô com rodas percorre
-waypoints planeados (A* na planta do mesh) DENTRO da cena 3DGS fotorrealista, colidindo com a
-geometria real (mesh oculto). Prova o twin para robótica.
-
-Cena: `lab_v4_robot_scene.usdz` (/World/gauss NuRec + /World/mesh colisão, Z-up, chão em z=0).
-Waypoints: `nav_path.json` (mesma pasta) — start/goal/lista de [x,y,z].
-
-Uso (Isaac 5.x nativo, headless) — resolve tudo relativo a ESTE ficheiro:
-  <isaac>/python.sh /caminho/para/lab_v4/run_robot_nav.py
-Opções: --steps 3000  --robot carter|jetbot  --cam follow|top
-Saída: <pasta_do_script>/robot_nav/rgb_XXXX.png (sequência p/ vídeo) + trajeto real do robô.
-"""
 import sys, json, math
 from pathlib import Path
 import numpy as np

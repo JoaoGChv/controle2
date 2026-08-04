@@ -186,3 +186,22 @@ Lidar 2D por raycasting dentro do Isaac (evita RTX lidar + OmniGraph; mesma estr
 Conduz com o PS4: o robô anda na sala GS (Isaac) e o scan do lidar aparece no RViz2 a varrer as
 paredes/mobília. Fluxo: cmd_vel UDP 9091 (entra) ; scan+pose UDP 9092 (sai).
 Opções lidar: --rays 180 --lidar-hz 10 --range 12.  TF: map->odom->base_link->laser.
+
+---
+
+## Lidar melhorado — 2D denso + modo 3D (PointCloud2)
+run_isaac_teleop_lidar.py + isaac_scan_bridge.py atualizados:
+- **2D denso** (por omissão): `--rays 360` -> /scan mais denso (melhor p/ slam_toolbox).
+- **3D** (opt-in): `--rings N --vfov G` -> raycast em N camadas verticais; publica /scan (anel do
+  meio, mantém SLAM 2D) + **/points (PointCloud2)**. RViz já tem o display PointCloud2 (/points).
+
+Exemplos (Terminal D, Isaac):
+  # 2D denso
+  ~/isaacsim/python.sh <lab_v4>/run_isaac_teleop_lidar.py --rays 360
+  # 3D (tipo lidar de N camadas) — começar modesto (raycast é em Python)
+  ~/isaacsim/python.sh <lab_v4>/run_isaac_teleop_lidar.py --rings 16 --rays 180 --vfov 30 --lidar-hz 5
+
+NOTA desempenho: o lidar é raycasting em Python (CPU). rings×rays grande = lento -> baixar
+--lidar-hz e/ou --rays. Para 3D denso/rápido a sério, o caminho é o **RTX Lidar nativo** do Isaac
+(GPU, via ROS2 bridge/OmniGraph) — fica como upgrade futuro; a captura Ouster real é a referência.
+Pacote UDP 3D pode chegar a ~23KB (o bridge já lê 65535).

@@ -7,7 +7,10 @@ Fluxo:  cmd_vel (UDP 9091, entra) -> conduz ;  scan+pose (UDP 9092, sai) -> ROS 
 
 Uso (Isaac 5.x nativo, SEM source do ROS):
   <isaac>/python.sh /caminho/lab_v4/run_isaac_teleop_lidar.py
-Opções: --speed 1.0  --rays 180  --lidar-hz 10  --range 12
+Opções: --speed 1.0  --rays 360  --rings 1  --vfov 30  --lidar-hz 10  --range 12
+  --rays  : nº de raios em azimute (denso; 360 por omissão)
+  --rings : camadas verticais. 1 = lidar 2D (/scan). >1 = lidar 3D (/scan + /points PointCloud2)
+  --vfov  : abertura vertical em graus (só 3D). Ex.: --rings 16 --vfov 30 = tipo lidar 3D.
 Noutros terminais (ROS sourced): cmd_vel_udp_bridge.py  +  isaac_scan_bridge.py  +  rviz2
 """
 import sys, socket, math, struct
@@ -20,7 +23,9 @@ HEADLESS = "--headless" in args
 SPEED = float(args[args.index("--speed") + 1]) if "--speed" in args else 1.0
 PORT_CMD = int(args[args.index("--port") + 1]) if "--port" in args else 9091
 PORT_SCAN = int(args[args.index("--scan-port") + 1]) if "--scan-port" in args else 9092
-NRAYS = int(args[args.index("--rays") + 1]) if "--rays" in args else 180
+NRAYS = int(args[args.index("--rays") + 1]) if "--rays" in args else 360      # azimute (mais denso)
+NRINGS = int(args[args.index("--rings") + 1]) if "--rings" in args else 1      # 1=2D; >1=3D
+VFOV = float(args[args.index("--vfov") + 1]) if "--vfov" in args else 30.0     # FOV vertical (graus, 3D)
 LIDAR_HZ = float(args[args.index("--lidar-hz") + 1]) if "--lidar-hz" in args else 10.0
 RANGE = float(args[args.index("--range") + 1]) if "--range" in args else 12.0
 LIDAR_Z = 0.35   # altura do lidar acima da base do robô
@@ -109,25 +114,33 @@ def main():
     # sockets: entra cmd_vel (9091), sai scan (9092)
     rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); rx.bind(("127.0.0.1", PORT_CMD)); rx.setblocking(False)
     tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); scan_addr = ("127.0.0.1", PORT_SCAN)
-    log(f"cmd_vel<-UDP {PORT_CMD} | scan->UDP {PORT_SCAN} ({NRAYS} raios, {LIDAR_HZ:.0f}Hz, {RANGE:.0f}m)")
+    modo = "3D" if NRINGS > 1 else "2D"
+    log(f"cmd_vel<-UDP {PORT_CMD} | scan->UDP {PORT_SCAN} "
+        f"(lidar {modo}: {NRINGS}anel×{NRAYS}az, {LIDAR_HZ:.0f}Hz, {RANGE:.0f}m)")
 
     sq = get_physx_scene_query_interface()
     amin, amax = -math.pi, math.pi
     ainc = (amax - amin) / NRAYS
     OFF = 0.40          # começa o raio FORA do corpo do robô (evita auto-colisão)
+    # elevações dos anéis (3D). 1 anel -> [0] (lidar 2D horizontal)
+    if NRINGS <= 1:
+        elevs = [0.0]
+    else:
+        vr = math.radians(VFOV)
+        elevs = [(-vr / 2) + k * (vr / (NRINGS - 1)) for k in range(NRINGS)]
 
     def do_scan(px, py, pz, yaw):
+        """Devolve ranges achatados (anel-maior: anel0 az0..azN, anel1 ...)."""
         rr = []
         oz = pz + LIDAR_Z
-        for i in range(NRAYS):
-            wa = yaw + amin + i * ainc
-            cx, cy = math.cos(wa), math.sin(wa)
-            ox, oy = px + OFF * cx, py + OFF * cy     # origem já fora do robô
-            hit = sq.raycast_closest((ox, oy, oz), (cx, cy, 0.0), RANGE - OFF)
-            if hit and hit.get("hit"):
-                rr.append(OFF + float(hit["distance"]))
-            else:
-                rr.append(RANGE)                       # nada -> alcance máximo
+        for el in elevs:
+            ce, se = math.cos(el), math.sin(el)
+            for i in range(NRAYS):
+                wa = yaw + amin + i * ainc
+                cx, cy = math.cos(wa) * ce, math.sin(wa) * ce
+                ox, oy, ozr = px + OFF * cx, py + OFF * cy, oz + OFF * se
+                hit = sq.raycast_closest((ox, oy, ozr), (cx, cy, se), RANGE - OFF)
+                rr.append(OFF + float(hit["distance"]) if (hit and hit.get("hit")) else RANGE)
         return rr
 
     v = w = 0.0; stale = 0; step = 0
@@ -151,8 +164,10 @@ def main():
             p, q = robot.get_world_pose()
             yaw = math.atan2(2 * (q[0] * q[3] + q[1] * q[2]), 1 - 2 * (q[2] ** 2 + q[3] ** 2))
             rr = do_scan(float(p[0]), float(p[1]), float(p[2]), yaw)
+            # cabeçalho: pose(4f) + rays(i) rings(i) + vfov(f) range(f) + ranges(rings*rays f)
             pkt = struct.pack("<4f", float(p[0]), float(p[1]), float(p[2]), yaw) \
-                + struct.pack("<i", NRAYS) + struct.pack(f"<{NRAYS}f", *rr)
+                + struct.pack("<iiff", NRAYS, NRINGS, VFOV, RANGE) \
+                + struct.pack(f"<{len(rr)}f", *rr)
             try:
                 tx.sendto(pkt, scan_addr)
             except Exception:
@@ -160,8 +175,8 @@ def main():
             if step % (period * 20) == 0:              # debug do scan a cada ~2s
                 arr = np.array(rr)
                 nhit = int((arr < RANGE - 0.01).sum())
-                log(f"scan: hits={nhit}/{NRAYS} dist min={arr.min():.2f} "
-                    f"méd={arr.mean():.2f} max={arr.max():.2f}")
+                log(f"scan: {NRINGS}anel×{NRAYS}az hits={nhit}/{len(rr)} "
+                    f"dist min={arr.min():.2f} méd={arr.mean():.2f} max={arr.max():.2f}")
     rx.close(); tx.close(); print("LIDAR TELEOP DONE")
 
 
